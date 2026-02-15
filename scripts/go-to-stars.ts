@@ -1,5 +1,4 @@
 import fs from 'fs';
-import path from 'path';
 
 const COLORS = {
     reset: "\x1b[0m",
@@ -12,6 +11,23 @@ const COLORS = {
 
 const log = (color: string, msg: string) => console.log(`${color}${msg}${COLORS.reset}`);
 
+// --- CONFIGURATION ---
+// Customize these for your specific project within the template
+const CONFIG = {
+    requiredEnvVars: ['NEXT_PUBLIC_FIREBASE_API_KEY', 'GEMINI_API_KEY'], // Add others like OPENAI_API_KEY as needed
+    requiredFiles: [
+        'src/components/MobileNav.tsx', // Enforce Mobile-First
+        'CLAUDE.md',
+        'README.md'
+    ],
+    requiredDeps: [
+        'lucide-react',
+        'framer-motion',
+        '@google/generative-ai' // AI-First template
+    ]
+};
+// ---------------------
+
 console.log(`${COLORS.bold}${COLORS.blue}🚀 Initiating 'Go to Stars' Protocol...${COLORS.reset}\n`);
 
 let hasErrors = false;
@@ -20,29 +36,29 @@ let hasErrors = false;
 log(COLORS.yellow, "1. Checking Environment...");
 if (fs.existsSync('.env.local')) {
     const envContent = fs.readFileSync('.env.local', 'utf-8');
-    const requiredKeys = ['GEMINI_API_KEY', 'NEXT_PUBLIC_FIREBASE_API_KEY'];
-    const missingKeys = requiredKeys.filter(key => !envContent.includes(key));
+    const missingKeys = CONFIG.requiredEnvVars.filter(key => !envContent.includes(key));
 
     if (missingKeys.length > 0) {
-        log(COLORS.red, `❌ Missing API Keys: ${missingKeys.join(', ')}`);
+        log(COLORS.red, `❌ Missing API Keys in .env.local: ${missingKeys.join(', ')}`);
         hasErrors = true;
     } else {
         log(COLORS.green, "✅ Environment variables present.");
     }
 } else {
-    log(COLORS.red, "❌ .env.local not found!");
+    log(COLORS.red, "❌ .env.local not found! Copy .env.template to .env.local and fill it.");
     hasErrors = true;
 }
 
-// 2. Mobile Adaptation Check
-log(COLORS.yellow, "\n2. Checking Mobile Readiness...");
-const componentsDir = path.join('src', 'components');
-if (fs.existsSync(path.join(componentsDir, 'MobileNav.tsx'))) {
-    log(COLORS.green, "✅ MobileNav component exists.");
-} else {
-    log(COLORS.red, "❌ MobileNav component missing! Mobile experience will be degraded.");
-    hasErrors = true;
-}
+// 2. Project Structure & Rules Check
+log(COLORS.yellow, "\n2. Checking Project Structure...");
+CONFIG.requiredFiles.forEach(file => {
+    if (fs.existsSync(file)) {
+        log(COLORS.green, `✅ Found ${file}`);
+    } else {
+        log(COLORS.red, `❌ Missing critical file: ${file}`);
+        hasErrors = true;
+    }
+});
 
 // 3. Configuration Integrity
 log(COLORS.yellow, "\n3. Checking Configuration...");
@@ -61,9 +77,8 @@ if (fs.existsSync(nextConfigPath)) {
 log(COLORS.yellow, "\n4. Checking Critical Dependencies...");
 const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf-8'));
 const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
-const requiredDeps = ['@google/generative-ai', 'lucide-react', 'framer-motion'];
 
-const missingDeps = requiredDeps.filter(d => !deps[d]);
+const missingDeps = CONFIG.requiredDeps.filter(d => !deps[d]);
 if (missingDeps.length > 0) {
     log(COLORS.red, `❌ Missing critical dependencies: ${missingDeps.join(', ')}`);
     hasErrors = true;
