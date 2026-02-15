@@ -53,7 +53,20 @@ interface AppArchived {
     sourceTitle?: string;
 }
 
+// Main Page Component
 export default function ArchivePage() {
+    return (
+        <React.Suspense fallback={
+            <div className="flex h-screen bg-black text-white font-sans overflow-hidden items-center justify-center">
+                <div className="w-8 h-8 border-2 border-gold/30 border-t-gold rounded-full animate-spin" />
+            </div>
+        }>
+            <ArchiveContent />
+        </React.Suspense>
+    );
+}
+
+function ArchiveContent() {
     const searchParams = useSearchParams();
     const categoryFilter = searchParams.get('cat');
     const [apps, setApps] = useState<AppArchived[]>([]);
