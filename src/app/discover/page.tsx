@@ -98,6 +98,16 @@ const BUSINESS_INSIGHTS = [
     }
 ];
 
+// Search Keywords Mapping
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+    'Legal Tech': ['юрист', 'право', 'договор', 'суд', 'закон'],
+    'Customer Service': ['поддержка', 'клиент', 'чат-бот', 'саппорт', 'оператор'],
+    'Marketing': ['маркетинг', 'реклама', 'smm', 'email', 'рассылка', 'продажи'],
+    'Logistics': ['логистика', 'доставка', 'транспорт', 'склад', 'маршрут'],
+    'Healthcare': ['медицина', 'врач', 'диагностика', 'здоровье', 'снимок'],
+    'Development': ['код', 'программист', 'разработка', 'git', 'девелопер']
+};
+
 export default function DiscoverPage() {
     const [searchQuery, setSearchQuery] = useState("");
     const [aiSummary, setAiSummary] = useState<string | null>(null);
@@ -137,13 +147,30 @@ export default function DiscoverPage() {
         );
     };
 
+    const smartSearch = (text: string, query: string) => {
+        const normalize = (str: string) => str.toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").trim();
+        const queryTerms = normalize(query).split(/\s+/).filter(t => t.length > 2); // Ignore short words like "для"
+        const normalizedText = normalize(text);
+
+        if (queryTerms.length === 0) return false;
+
+        // Check if any significant term matches
+        return queryTerms.some(term => normalizedText.includes(term));
+    };
+
     const displayedCases = (viewMode === 'all' ? PRACTICAL_CASES : PRACTICAL_CASES.filter(c => favorites.includes(c.id)))
-        .filter(item =>
-            searchQuery.trim() === "" ||
-            item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            item.summary.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            item.category.toLowerCase().includes(searchQuery.toLowerCase())
-        );
+        .filter(item => {
+            if (searchQuery.trim() === "") return true;
+
+            // Check direct text match
+            if (smartSearch(item.title, searchQuery) || smartSearch(item.summary, searchQuery)) return true;
+
+            // Check category keywords
+            const categoryKeywords = CATEGORY_KEYWORDS[item.category] || [];
+            if (smartSearch(categoryKeywords.join(' '), searchQuery)) return true;
+
+            return false;
+        });
 
     return (
         <div className="flex h-screen bg-black text-white font-sans overflow-hidden">
