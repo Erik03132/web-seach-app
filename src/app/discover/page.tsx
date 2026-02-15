@@ -100,8 +100,34 @@ const BUSINESS_INSIGHTS = [
 
 export default function DiscoverPage() {
     const [searchQuery, setSearchQuery] = useState("");
+    const [aiSummary, setAiSummary] = useState<string | null>(null);
+    const [isAiLoading, setIsAiLoading] = useState(false);
     const [favorites, setFavorites] = useState<number[]>([]);
     const [viewMode, setViewMode] = useState<'all' | 'favorites'>('all');
+
+    const handleSearch = async () => {
+        if (!searchQuery.trim()) return;
+
+        setIsAiLoading(true);
+        setAiSummary(null);
+
+        try {
+            const response = await fetch('/api/ai-summary', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ query: searchQuery }),
+            });
+
+            const data = await response.json();
+            if (data.summary) {
+                setAiSummary(data.summary);
+            }
+        } catch (error) {
+            console.error("Failed to fetch AI summary", error);
+        } finally {
+            setIsAiLoading(false);
+        }
+    };
 
     const toggleFavorite = (id: number, e: React.MouseEvent) => {
         e.preventDefault();
@@ -174,10 +200,50 @@ export default function DiscoverPage() {
                                     type="text"
                                     value={searchQuery}
                                     onChange={(e) => setSearchQuery(e.target.value)}
-                                    placeholder="Фильтровать кейсы и тренды..."
-                                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-14 pr-6 text-base text-white focus:outline-none focus:border-gold/50 focus:bg-white/10 transition-all shadow-lg"
+                                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                                    placeholder="Спросите AI или ищите кейсы..."
+                                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-14 pr-16 text-base text-white focus:outline-none focus:border-gold/50 focus:bg-white/10 transition-all shadow-lg"
                                 />
+                                <button
+                                    onClick={handleSearch}
+                                    className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-gold/10 hover:bg-gold/20 text-gold rounded-xl transition-colors"
+                                >
+                                    {isAiLoading ? <div className="w-5 h-5 border-2 border-gold border-t-transparent rounded-full animate-spin" /> : <ArrowLeft size={20} className="rotate-180" />}
+                                </button>
                             </div>
+
+                            {/* AI Summary Card */}
+                            {(aiSummary || isAiLoading) && (
+                                <div className="max-w-3xl mx-auto mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                                    <div className="glass border border-gold/20 rounded-2xl p-6 relative overflow-hidden">
+                                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-gold to-transparent opacity-50" />
+
+                                        <div className="flex gap-4">
+                                            <div className="shrink-0 w-10 h-10 rounded-full bg-gradient-to-br from-gold/20 to-purple-500/20 flex items-center justify-center border border-white/10">
+                                                <Sparkles size={20} className="text-gold" />
+                                            </div>
+                                            <div className="space-y-2 w-full">
+                                                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                                                    AI Инсайт
+                                                    {isAiLoading && <span className="text-xs font-normal text-white/40 animate-pulse">• Думаю...</span>}
+                                                </h3>
+
+                                                {isAiLoading ? (
+                                                    <div className="space-y-2 opacity-50">
+                                                        <div className="h-4 bg-white/10 rounded w-3/4 animate-pulse" />
+                                                        <div className="h-4 bg-white/10 rounded w-full animate-pulse" />
+                                                        <div className="h-4 bg-white/10 rounded w-5/6 animate-pulse" />
+                                                    </div>
+                                                ) : (
+                                                    <div className="prose prose-invert prose-sm max-w-none text-white/80 leading-relaxed">
+                                                        <p className="whitespace-pre-line">{aiSummary}</p>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </section>
 
@@ -226,7 +292,7 @@ export default function DiscoverPage() {
                                             {/* Heart Button */}
                                             <button
                                                 onClick={(e) => toggleFavorite(item.id, e)}
-                                                className="absolute top-4 right-4 p-2 rounded-full hover:bg-white/10 transition-all z-10"
+                                                className="absolute top-4 right-4 p-3 rounded-full hover:bg-white/10 active:scale-90 transition-all z-10 touch-manipulation"
                                             >
                                                 <Heart
                                                     size={18}
@@ -264,8 +330,8 @@ export default function DiscoverPage() {
                     </section>
 
                     {/* Business Focus Section */}
-                    <section className="bg-gradient-to-r from-gold/5 via-white/[0.02] to-transparent rounded-3xl p-8 border border-white/5">
-                        <div className="flex items-center gap-3 mb-8">
+                    <section className="bg-gradient-to-r from-gold/5 via-white/[0.02] to-transparent rounded-3xl p-6 md:p-8 border border-white/5">
+                        <div className="flex items-center gap-3 mb-6 md:mb-8">
                             <div className="p-3 bg-gold/20 rounded-xl text-gold">
                                 <Briefcase size={24} />
                             </div>
@@ -275,18 +341,18 @@ export default function DiscoverPage() {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="flex md:grid md:grid-cols-3 gap-6 overflow-x-auto pb-4 md:pb-0 snap-x snap-mandatory -mx-6 px-6 md:mx-0 md:px-0 scrollbar-hide">
                             {BUSINESS_INSIGHTS.map((insight) => (
-                                <div key={insight.id} className="group cursor-pointer">
+                                <div key={insight.id} className="group cursor-pointer min-w-[280px] md:min-w-0 snap-center bg-white/5 md:bg-transparent rounded-2xl p-4 md:p-0 border border-white/5 md:border-0 hover:border-gold/20 transition-all">
                                     <div className="flex items-start gap-4 mb-3">
                                         <div className="mt-1">
                                             <TrendingUp size={16} className="text-white/20 group-hover:text-green-400 transition-colors" />
                                         </div>
                                         <div>
-                                            <h4 className="font-bold text-white/90 group-hover:text-gold transition-colors mb-2">
+                                            <h4 className="font-bold text-white/90 group-hover:text-gold transition-colors mb-2 text-sm md:text-base">
                                                 {insight.title}
                                             </h4>
-                                            <p className="text-xs text-white/50 leading-relaxed mb-2">
+                                            <p className="text-xs text-white/50 leading-relaxed mb-2 line-clamp-2 md:line-clamp-none">
                                                 {insight.description}
                                             </p>
                                             <span className="text-[10px] text-white/20 uppercase tracking-widest flex items-center gap-1">
