@@ -192,6 +192,15 @@ export async function POST(req: NextRequest) {
                         detectedApps: (res as any).data?.detectedApps || []
                     });
                 }
+                // Save Channel to "channels" collection for Cron
+                const channelRef = doc(db, "channels", channelInfo.channelId || `yt_${channelInfo.handle}`);
+                await setDoc(channelRef, {
+                    url: channelInfo.url, // e.g. https://www.youtube.com/@ChannelName
+                    title: channelInfo.title,
+                    sourceType: 'youtube',
+                    lastScannedAt: serverTimestamp()
+                }, { merge: true });
+
                 // Cleanup after processing channel
                 await cleanupOldSources();
                 return NextResponse.json({ message: "Processed channel", type: "channel", results }, { status: 201 });
@@ -226,6 +235,15 @@ export async function POST(req: NextRequest) {
                         detectedApps: (res as any).data?.detectedApps || []
                     });
                 }
+                // Save Channel to "channels" collection for Cron
+                const channelRef = doc(db, "channels", `tg_${info.handle}`);
+                await setDoc(channelRef, {
+                    url: `https://t.me/${info.handle}`,
+                    title: info.handle,
+                    sourceType: 'telegram',
+                    lastScannedAt: serverTimestamp()
+                }, { merge: true });
+
                 // Cleanup
                 await cleanupOldSources();
                 return NextResponse.json({ message: "Processed TG channel", type: "channel", results }, { status: 201 });
