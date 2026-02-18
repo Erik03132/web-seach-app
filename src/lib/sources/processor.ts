@@ -30,7 +30,9 @@ async function registerChannel(title: string, sourceType: 'youtube' | 'telegram'
     const { db } = await import("@/lib/firebase/firebase");
     const { doc, setDoc, serverTimestamp } = await import("firebase/firestore");
 
-    const docId = id || `${sourceType === 'youtube' ? 'yt' : 'tg'}_${title.replace(/[^\w]/gi, '').toLowerCase()}`;
+    // Create a clean ID
+    const docId = id || `${sourceType === 'youtube' ? 'yt' : 'tg'}_${title.replace(/[^\w]/gi, '').toLowerCase().substring(0, 40)}`;
+
     await setDoc(doc(db, "channels", docId), {
         title,
         url,
@@ -53,21 +55,24 @@ async function saveYoutubeVideoToFirestore(details: YoutubeVideoDetails) {
     if (sourceDoc.exists()) {
         const data = sourceDoc.data();
         repairAttempts = data.repairAttempts || 0;
-        // Skip if healthy and has apps
-        if (data.detectedApps?.length > 0 && data.needsRepair === false) {
+
+        // IF we have apps AND no repair flag AND it's not a fallback, we are GOOD.
+        if (data.detectedApps?.length > 0 && data.needsRepair === false && !data.isFallback) {
             return { status: "exists", data };
         }
-        if (repairAttempts >= 5) return { status: "exists", data };
+
+        // Safety break
+        if (repairAttempts >= 10) return { status: "exists", data };
     }
 
-    console.log(`[AI] Analyzing YouTube: ${details.title}`);
-    const textToAnalyze = `Title: ${details.title}\nTags: ${details.tags.join(", ")}\nDescription: ${details.description}`;
+    console.log(`[AI Sync] Analyzing YT: ${details.title}`);
+    const textToAnalyze = `${details.title}\n\nTags: ${details.tags.join(", ")}\n\nDescription: ${details.description}`;
     const analysis = await analyzeContent(textToAnalyze);
 
     const sourceData: any = {
         sourceType: "youtube",
         externalId: details.id,
-        title: analysis.title || details.title,
+        title: (analysis.title && analysis.title.length > 5) ? analysis.title : details.title,
         description: details.description || "",
         aiSummary: analysis.summary || "",
         author: details.channelTitle,
@@ -78,9 +83,11 @@ async function saveYoutubeVideoToFirestore(details: YoutubeVideoDetails) {
         detectedApps: analysis.apps || [],
         repairAttempts: repairAttempts + 1,
         isFallback: analysis.isFallback === true,
+        // Mark for repair if failed or no apps (until 3 attempts)
         needsRepair: (analysis.isFallback === true || analysis.apps.length === 0) && repairAttempts < 3,
-        createdAt: sourceDoc.exists() ? (sourceDoc.data().createdAt || serverTimestamp()) : serverTimestamp(),
     };
+
+    if (!sourceDoc.exists()) sourceData.createdAt = serverTimestamp();
 
     await setDoc(sourceRef, sourceData, { merge: true });
     return { status: "created", data: sourceData };
@@ -100,19 +107,19 @@ async function saveTelegramPostToFirestore(details: TelegramPostDetails) {
     if (sourceDoc.exists()) {
         const data = sourceDoc.data();
         repairAttempts = data.repairAttempts || 0;
-        if (data.detectedApps?.length > 0 && data.needsRepair === false) {
+        if (data.detectedApps?.length > 0 && data.needsRepair === false && !data.isFallback) {
             return { status: "exists", data };
         }
-        if (repairAttempts >= 5) return { status: "exists", data };
+        if (repairAttempts >= 10) return { status: "exists", data };
     }
 
-    console.log(`[AI] Analyzing Telegram: ${details.channelHandle}`);
+    console.log(`[AI Sync] Analyzing TG: ${details.channelHandle}`);
     const analysis = await analyzeContent(details.text);
 
     const sourceData: any = {
         sourceType: "telegram",
         externalId: details.id,
-        title: analysis.title || details.text.split('\n')[0].substring(0, 100),
+        title: (analysis.title && analysis.title.length > 5) ? analysis.title : details.text.split('\n')[0].substring(0, 100),
         description: details.text,
         aiSummary: analysis.summary || "",
         author: details.channelHandle,
@@ -124,8 +131,9 @@ async function saveTelegramPostToFirestore(details: TelegramPostDetails) {
         repairAttempts: repairAttempts + 1,
         isFallback: analysis.isFallback === true,
         needsRepair: (analysis.isFallback === true || analysis.apps.length === 0) && repairAttempts < 3,
-        createdAt: sourceDoc.exists() ? (sourceDoc.data().createdAt || serverTimestamp()) : serverTimestamp(),
     };
+
+    if (!sourceDoc.exists()) sourceData.createdAt = serverTimestamp();
 
     await setDoc(sourceRef, sourceData, { merge: true });
     return { status: "created", data: sourceData };
@@ -137,7 +145,7 @@ export async function processSourceUrl(url: string, type?: 'youtube' | 'telegram
         if (url.includes("t.me") || url.startsWith("@")) detectedType = "telegram";
         else if (url.includes("youtube.com") || url.includes("youtu.be")) detectedType = "youtube";
     }
-    if (!detectedType) throw new Error("Unsupported source type");
+    if (!detectedType) throw new Error("Unknown source type");
 
     if (detectedType === 'youtube') {
         const videoId = extractYoutubeId(url);
@@ -158,7 +166,6 @@ export async function processSourceUrl(url: string, type?: 'youtube' | 'telegram
                 const res = await saveYoutubeVideoToFirestore(v);
                 results.push({ title: v.title, status: res.status });
             }
-            // Title for channel is hard to get without extra API call here, use value
             await registerChannel(info.value, 'youtube', url);
             return { type: 'channel', message: "ok", results };
         }
@@ -183,5 +190,5 @@ export async function processSourceUrl(url: string, type?: 'youtube' | 'telegram
             return { type: 'channel', message: "ok", results };
         }
     }
-    throw new Error("Processing failed");
+    throw new Error("Logic complete - no actions performed");
 }

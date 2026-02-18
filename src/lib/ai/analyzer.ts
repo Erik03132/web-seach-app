@@ -18,61 +18,90 @@ export interface AppRecommendation {
 export interface AnalysisResult {
   summary: string;
   apps: AppRecommendation[];
-  title?: string; // Optional title if LLM provides one
+  title?: string;
+  isFallback?: boolean;
+}
+
+/** Robust JSON extraction */
+function extractJson(text: string): any {
+  // 1. Remove markdown backticks if any
+  let cleaned = text.replace(/```json/g, "").replace(/```/g, "").trim();
+
+  // 2. Find the first '{' and the last '}'
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+
+  if (start === -1 || end === -1) throw new Error("No JSON object found in response");
+
+  const jsonStr = cleaned.substring(start, end + 1);
+  return JSON.parse(jsonStr);
 }
 
 export async function analyzeContent(text: string): Promise<AnalysisResult> {
   const prompt = `
-    Проанализируй следующий текст и сделай следующее на РУССКОМ языке:
+    Analyze the following technical or software-related content and provide a structured summary in Russian.
     
-    1. Придумай короткий привлекательный заголовок для этого поста.
-    2. Напиши краткое саммари (2-3 предложения), о чем текст и какую пользу несет.
-    3. Извлеки все упомянутые программы, сервисы, нейросети или сайты.
+    YOUR TASKS (Output in RUSSIAN):
+    1. title: Create a short, engaging headline (no labels like "Title:").
+    2. summary: Write 2-3 sentences summarizing the value or news.
+    3. apps: Extract ALL software, AI tools, services, or websites mentioned.
     
-    Для каждого найденного инструмента заполни следующие поля:
-    - "name": Название инструмента.
-    - "category": Категория из списка: [LLM, Vibe Coding, Design, Automation, Image Generation, Разное].
-    - "shortDescription": Краткое описание (1 предложение).
-    - "detailedDescription": Подробное описание (2-3 абзаца): функции, кейсы.
-    - "features": Массив строк (3-5 фич).
-    - "url": Ссылка на сайт (если есть).
-    - "pricing": "free", "paid", или "freemium".
-    - "pricingDetails": Описание цен.
-    - "dailyCredits": Инфо о лимитах или null.
-    - "hasMcp": boolean (упоминается ли MCP).
-    - "hasApi": boolean (есть ли API).
-    - "minPaidPrice": Минимальная цена или null.
-
-    Верни ответ СТРОГО в формате JSON с полями "title", "summary" и "apps".
-    Не используй markdown блоки (\`\`\`json). Только чистый JSON.
-
-    Текст для анализа:
+    For each app/tool:
+    - name: Name of the tool.
+    - category: Choose from: [LLM, Vibe Coding, Design, Automation, Image Generation, Other].
+    - shortDescription: 1 concise sentence.
+    - detailedDescription: 1-2 detailed paragraphs about features and benefits.
+    - features: Array of 3-5 strings.
+    - url: Website URL (if found).
+    - pricing: "free", "paid", or "freemium".
+    
+    FORMAT: Respond ONLY with a valid JSON object. No preamble, no post-text.
+    
+    CONTENT:
     """
     ${text}
     """
-  `;
+    
+    JSON STRUCTURE EXAMPLE:
+    {
+        "title": "...",
+        "summary": "...",
+        "apps": [
+            {
+                "name": "...",
+                "category": "...",
+                "shortDescription": "...",
+                "detailedDescription": "...",
+                "features": ["...", "..."],
+                "url": "...",
+                "pricing": "...",
+                "hasMcp": false,
+                "hasApi": false
+            }
+        ]
+    }
+    `;
 
   try {
-    const response = await askGemini(prompt);
-
-    // Clean potential leftovers
-    let cleanResponse = response.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-    const jsonMatch = cleanResponse.match(/\{[\s\S]*\}/);
-    const jsonStr = jsonMatch ? jsonMatch[0] : cleanResponse;
-
-    const parsed = JSON.parse(jsonStr);
+    const rawContent = await askGemini(prompt);
+    const parsed = extractJson(rawContent);
 
     return {
       title: parsed.title || "",
-      summary: parsed.summary || "Анализ завершен.",
-      apps: parsed.apps || []
+      summary: parsed.summary || "Анализ выполнен.",
+      apps: parsed.apps || [],
+      isFallback: false
     };
-  } catch (error: any) {
-    console.error("[AI Expert] Gemini Analysis Failed:", error.message);
+  } catch (e: any) {
+    console.error("[Analyzer Fail]:", e.message);
+
+    // Context-aware basic fallback
+    const lines = text.split('\n').filter(l => l.trim().length > 10);
     return {
-      title: text.split('\n')[0].substring(0, 70),
-      summary: "Ошибка при анализе контента.",
-      apps: []
+      title: (lines[0] || "Новый пост").replace(/^Title:\s*/i, ""),
+      summary: "Краткое описание временно недоступно.",
+      apps: [],
+      isFallback: true
     };
   }
 }
