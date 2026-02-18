@@ -302,9 +302,29 @@ function FeedCard({ post, index }: { post: SourcePost, index: number }) {
                             <div className="text-[10px] text-white/40 uppercase tracking-widest font-medium">{publishStr}</div>
                         </div>
                     </div>
-                    <a href={post.url} target="_blank" className="p-2 bg-white/5 hover:bg-gold hover:text-black rounded-lg transition-all duration-300">
-                        <ExternalLink size={14} />
-                    </a>
+                    <div className="flex items-center gap-2">
+                        <button
+                            onClick={async () => {
+                                const toastId = toast.loading("Перезапуск анализа...");
+                                try {
+                                    const res = await fetch('/api/sources', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify({ url: post.url, type: post.sourceType })
+                                    });
+                                    if (res.ok) toast.success("Готово! Обновите страницу", { id: toastId });
+                                    else toast.error("Ошибка при ремонте", { id: toastId });
+                                } catch (e) { toast.error("Сбой сети", { id: toastId }); }
+                            }}
+                            className="p-2 bg-white/5 hover:bg-gold/20 text-white/30 hover:text-gold rounded-lg transition-all"
+                            title="Перезапустить ИИ-анализ"
+                        >
+                            <RefreshCw size={14} />
+                        </button>
+                        <a href={post.url} target="_blank" className="p-2 bg-white/5 hover:bg-gold hover:text-black rounded-lg transition-all duration-300">
+                            <ExternalLink size={14} />
+                        </a>
+                    </div>
                 </div>
 
                 {/* Content Section */}
