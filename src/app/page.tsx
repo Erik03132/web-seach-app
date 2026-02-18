@@ -343,7 +343,7 @@ function FeedCard({ post, index }: { post: SourcePost, index: number }) {
                     )}
                     <div className="flex-1">
                         <h2 className="text-xl font-bold mb-4 leading-snug group-hover:text-gold transition-colors duration-300">
-                            {post.title}
+                            {post.title.replace(/^(заголовок|title|название|тема):\s*/i, "").replace(/[#*`]/g, "").trim()}
                         </h2>
 
                         {post.aiSummary && (
