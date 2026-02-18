@@ -82,6 +82,7 @@ async function saveYoutubeVideoToFirestore(details: YoutubeVideoDetails) {
     // AI Analysis
     let detectedApps: AppRecommendation[] = [];
     let aiSummary = "";
+    let aiTitle = details.title;
 
     console.log(`[AI] Analyzing YouTube: ${details.title}`);
     try {
@@ -89,12 +90,13 @@ async function saveYoutubeVideoToFirestore(details: YoutubeVideoDetails) {
         const analysis = await analyzeContent(textToAnalyze);
         detectedApps = analysis.apps || [];
         aiSummary = analysis.summary || "";
+        if (analysis.title) aiTitle = analysis.title;
     } catch (e) { console.error("[AI] Error:", e); }
 
     const sourceData = {
         sourceType: "youtube",
         externalId: details.id,
-        title: details.title,
+        title: aiTitle,
         description: details.description || "",
         aiSummary,
         author: details.channelTitle,
@@ -126,18 +128,20 @@ async function saveTelegramPostToFirestore(details: TelegramPostDetails) {
     // AI Analysis
     let detectedApps: AppRecommendation[] = [];
     let aiSummary = "";
+    let aiTitle = details.text.split('\n')[0].substring(0, 100);
 
     console.log(`[AI] Analyzing Telegram post from: ${details.channelHandle}`);
     try {
         const analysis = await analyzeContent(details.text);
         detectedApps = analysis.apps || [];
         aiSummary = analysis.summary || "";
+        if (analysis.title) aiTitle = analysis.title;
     } catch (e) { console.error("[AI] Error:", e); }
 
     const sourceData = {
         sourceType: "telegram",
         externalId: details.id,
-        title: details.text.split('\n')[0].substring(0, 100), // First line as title
+        title: aiTitle,
         description: details.text,
         aiSummary,
         author: details.channelHandle, // Use handle as author
@@ -193,10 +197,10 @@ export async function POST(req: NextRequest) {
                     });
                 }
                 // Save Channel to "channels" collection for Cron
-                const channelRef = doc(db, "channels", channelInfo.channelId || `yt_${channelInfo.handle}`);
+                const channelRef = doc(db, "channels", `yt_${channelInfo.value.replace('@', '')}`);
                 await setDoc(channelRef, {
-                    url: channelInfo.url, // e.g. https://www.youtube.com/@ChannelName
-                    title: channelInfo.title,
+                    url: url, // Use the original URL
+                    title: channelInfo.value,
                     sourceType: 'youtube',
                     lastScannedAt: serverTimestamp()
                 }, { merge: true });

@@ -1,39 +1,79 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { fetchWithTimeout } from "@/lib/utils";
 
-const apiKey = process.env.GEMINI_API_KEY;
+/**
+ * Google Gemini API клиент
+ * Документация: https://ai.google.dev
+ */
 
-if (!apiKey) {
-    console.warn("GEMINI_API_KEY is not defined. AI features might not work.");
+interface GeminiResponse {
+    candidates?: Array<{
+        content?: { parts: Array<{ text: string }> },
+        finishReason?: string
+    }>;
+    error?: {
+        message: string;
+        code: number;
+    };
 }
 
-const genAI = new GoogleGenerativeAI(apiKey || "");
+export async function askGemini(prompt: string): Promise<string> {
+    const apiKey = process.env.GEMINI_API_KEY
+    if (!apiKey) throw new Error('GEMINI_API_KEY не задан')
+
+    let lastError: any;
+    for (let i = 0; i < 3; i++) {
+        try {
+            const response = await fetchWithTimeout(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+                        generationConfig: {
+                            temperature: 0.1,
+                            topP: 0.95,
+                        }
+                    }),
+                    timeout: 25000 // 25s
+                } as any
+            )
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Gemini API error ${response.status}: ${errorText.substring(0, 150)}`);
+            }
+
+            const data: GeminiResponse = await response.json()
+
+            if (data.error) {
+                throw new Error(`Gemini Error: ${data.error.message}`);
+            }
+
+            const candidate = data.candidates?.[0];
+            if (!candidate || !candidate.content || !candidate.content.parts?.[0]?.text) {
+                const reason = candidate?.finishReason || "UNKNOWN";
+                throw new Error(`No content from Gemini (Reason: ${reason})`);
+            }
+
+            return candidate.content.parts[0].text
+        } catch (e: any) {
+            lastError = e;
+            console.warn(`[Gemini] Attempt ${i + 1} failed:`, e.message);
+            if (i < 2) await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+        }
+    }
+    throw lastError;
+}
 
 export async function generateSearchSummary(query: string): Promise<string> {
-    if (!apiKey) return "AI ключ не найден. Пожалуйста, настройте GEMINI_API_KEY.";
-
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
         const prompt = `
-        Ты — умный бизнес-ассистент, который помогает предпринимателям находить AI-решения.
-        Пользователь ищет: "${query}".
-
-        Твоя задача:
-        1. Кратко и емко ответь на этот запрос (2-3 предложения).
-        2. Если это вопрос про инструменты — посоветуй 1-2 лучших (не придумывай несуществующие).
-        3. Если это абстрактный вопрос (например, "как внедрить AI") — дай конкретный первый шаг.
-        
-        Отвечай на русском языке. Будь кратким, деловым и полезным. Не используй маркеринговый булшит.
-        Твой ответ должен быть простым текстом (можно использовать markdown для жирного шрифта).
+        Ты — умный бизнес-ассистент. Пользователь ищет: "${query}".
+        Кратко (2-3 предложения) ответь на русском языке. Будь полезным и конкретным.
         `;
-
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        const text = response.text();
-
-        return text;
-    } catch (error) {
-        console.error("Gemini Generation Failed:", error);
-        return "Не удалось сгенерировать ответ. Попробуйте позже.";
+        return await askGemini(prompt);
+    } catch (e) {
+        return "Не удалось сгенерировать ответ.";
     }
 }
