@@ -40,20 +40,26 @@ async function saveYoutubeVideoToFirestore(details: YoutubeVideoDetails) {
     const sourceRef = doc(db, "sources", sourceId);
     const sourceDoc = await getDoc(sourceRef);
 
-    let currentRepairAttempts = 0;
+    let repairAttempts = 0;
     if (sourceDoc.exists()) {
         const data = sourceDoc.data();
-        currentRepairAttempts = data.repairAttempts || 0;
+        repairAttempts = data.repairAttempts || 0;
 
-        // IF we have apps AND no repair flag AND it's not a fallback, we are GOOD.
-        if (data.detectedApps?.length > 0 && data.needsRepair === false && !data.isFallback) {
+        // Success case: has apps and no repair flags
+        if (data.detectedApps?.length > 0 && !data.needsRepair && !data.isFallback) {
             return { status: "exists", data };
         }
-        // IF too many attempts, stop
-        if (currentRepairAttempts >= 12) return { status: "exists", data };
+
+        // Stop if too many attempts
+        if (repairAttempts >= 10) return { status: "exists", data };
+
+        // If it was a clean run (not fallback) but found NO apps, give it at most 3 total tries
+        if (!data.isFallback && data.detectedApps?.length === 0 && repairAttempts >= 3) {
+            return { status: "exists", data };
+        }
     }
 
-    console.log(`[Processor] Analyzing YT: ${details.id} (Attempt ${currentRepairAttempts + 1})`);
+    console.log(`[Processor] AI-Sync YT: ${details.id} (Att: ${repairAttempts + 1})`);
     const analysis = await analyzeContent(`${details.title}\n\n${details.description}`);
 
     const sourceData: any = {
@@ -68,10 +74,10 @@ async function saveYoutubeVideoToFirestore(details: YoutubeVideoDetails) {
         thumbnailUrl: details.thumbnailUrl,
         tags: details.tags || [],
         detectedApps: analysis.apps || [],
-        repairAttempts: currentRepairAttempts + 1,
+        repairAttempts: repairAttempts + 1,
         isFallback: analysis.isFallback === true,
-        // Mark for repair if failed or no apps (until limit reached)
-        needsRepair: (analysis.isFallback === true || analysis.apps.length === 0) && currentRepairAttempts < 5,
+        // Mark for repair if failed OR if found ZERO apps (we want cards!)
+        needsRepair: (analysis.isFallback === true || (analysis.apps || []).length === 0) && repairAttempts < 4,
     };
 
     if (!sourceDoc.exists()) sourceData.createdAt = serverTimestamp();
@@ -90,17 +96,21 @@ async function saveTelegramPostToFirestore(details: TelegramPostDetails) {
     const sourceRef = doc(db, "sources", sourceId);
     const sourceDoc = await getDoc(sourceRef);
 
-    let currentRepairAttempts = 0;
+    let repairAttempts = 0;
     if (sourceDoc.exists()) {
         const data = sourceDoc.data();
-        currentRepairAttempts = data.repairAttempts || 0;
-        if (data.detectedApps?.length > 0 && data.needsRepair === false && !data.isFallback) {
+        repairAttempts = data.repairAttempts || 0;
+
+        if (data.detectedApps?.length > 0 && !data.needsRepair && !data.isFallback) {
             return { status: "exists", data };
         }
-        if (currentRepairAttempts >= 12) return { status: "exists", data };
+        if (repairAttempts >= 10) return { status: "exists", data };
+        if (!data.isFallback && data.detectedApps?.length === 0 && repairAttempts >= 3) {
+            return { status: "exists", data };
+        }
     }
 
-    console.log(`[Processor] Analyzing TG: ${details.id} (Attempt ${currentRepairAttempts + 1})`);
+    console.log(`[Processor] AI-Sync TG: ${details.id} (Att: ${repairAttempts + 1})`);
     const analysis = await analyzeContent(details.text);
 
     const sourceData: any = {
@@ -115,9 +125,9 @@ async function saveTelegramPostToFirestore(details: TelegramPostDetails) {
         thumbnailUrl: details.imageUrl || null,
         tags: [],
         detectedApps: analysis.apps || [],
-        repairAttempts: currentRepairAttempts + 1,
+        repairAttempts: repairAttempts + 1,
         isFallback: analysis.isFallback === true,
-        needsRepair: (analysis.isFallback === true || analysis.apps.length === 0) && currentRepairAttempts < 5,
+        needsRepair: (analysis.isFallback === true || (analysis.apps || []).length === 0) && repairAttempts < 4,
     };
 
     if (!sourceDoc.exists()) sourceData.createdAt = serverTimestamp();

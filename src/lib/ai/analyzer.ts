@@ -17,72 +17,50 @@ export interface AnalysisResult {
   isFallback?: boolean;
 }
 
-function extractJson(text: string): any {
-  // Attempt to find JSON in the response
-  const jsonStart = text.indexOf('{');
-  const jsonEnd = text.lastIndexOf('}');
-
-  if (jsonStart === -1 || jsonEnd === -1) {
-    throw new Error("No JSON found in response");
-  }
-
-  const jsonStr = text.substring(jsonStart, jsonEnd + 1);
-  try {
-    return JSON.parse(jsonStr);
-  } catch (e) {
-    // One last try: remove markdown-like thinking or code blocks manually
-    const cleaner = jsonStr
-      .replace(/```json/g, "")
-      .replace(/```/g, "")
-      .trim();
-    return JSON.parse(cleaner);
-  }
-}
-
 export async function analyzeContent(text: string): Promise<AnalysisResult> {
-  if (!text || text.trim().length < 10) {
+  if (!text || text.trim().length < 5) {
     return { title: "Новый пост", summary: "Описание отсутствует", apps: [], isFallback: true };
   }
 
+  // Aggressive reasoning prompt
   const prompt = `
-    Analyze this text and return a JSON object in Russian.
+    Analyze this message and extract all software products or web services mentioned.
     
-    RULES:
-    1. Respond ONLY with JSON.
-    2. Fields: "title" (catchy, max 60 chars), "summary" (2-3 sentences), "apps" (list of software/AI tools found).
-    3. Each app: "name", "category", "shortDescription", "detailedDescription", "features" (array), "url", "pricing".
+    INSTRUCTIONS:
+    - Step 1: Identify all tools, neuro-networks, mobile apps, or sites.
+    - Step 2: Extract features and pricing for each.
+    - Step 3: Write a 3-sentence summary in Russian.
+    - Step 4: Create a short Russian title.
+    - Final Output: Send ONLY a JSON object.
+
+    OUTPUT FIELDS (all strings in Russian):
+    - title: Catchy headline.
+    - summary: Helpful summary.
+    - apps: Array of tools. Each tool needs: name, category, shortDescription, detailedDescription, features (min 3), url, pricing.
 
     TEXT:
     """
-    ${text.substring(0, 5000)}
+    ${text.substring(0, 10000)}
     """
-    
-    OUTPUT STRUCTURE:
-    {
-      "title": "Заголовок без лишних слов",
-      "summary": "Текст саммари на русском.",
-      "apps": []
-    }
     `;
 
   try {
-    const rawResponse = await askGemini(prompt);
-    const parsed = extractJson(rawResponse);
+    const rawJson = await askGemini(prompt, true);
+    const parsed = JSON.parse(rawJson);
 
     return {
-      title: (parsed.title || "").replace(/^(title|заголовок):\s*/i, "").trim(),
-      summary: parsed.summary || "",
+      title: (parsed.title || "").substring(0, 70),
+      summary: parsed.summary || "Анализ завершен.",
       apps: Array.isArray(parsed.apps) ? parsed.apps : [],
       isFallback: false
     };
   } catch (error: any) {
-    console.error("[AI FAIL]:", error.message);
+    console.error("[Analyzer Fail]:", error.message);
 
-    // Better fallback: extraction from text
-    const firstLine = text.split('\n')[0].substring(0, 100).trim();
+    const firstLine = text.split('\n')[0].replace(/[#*]/g, '').trim().substring(0, 80);
     return {
       title: firstLine || "Новый пост",
-      summary: "Краткое описание временно недоступно.",
+      summary: "Краткий обзор временно недоступен.",
       apps: [],
       isFallback: true
     };
