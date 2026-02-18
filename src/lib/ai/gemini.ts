@@ -1,40 +1,56 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const apiKey = process.env.GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(apiKey || "");
-
 /**
  * Common entry point for Gemini calls.
- * Uses the official SDK with a manual retry mechanism.
+ * Uses RAW fetch instead of SDK for maximum reliability in Vercel Edge/Serverless environments.
  */
 export async function askGemini(prompt: string, isJson: boolean = false): Promise<string> {
-    if (!apiKey) throw new Error("GEMINI_API_KEY_NOT_FOUND");
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+        console.error("[Gemini] API Key Missing from Environment");
+        throw new Error("GEMINI_API_KEY_NOT_FOUND");
+    }
+
+    // Using gemini-1.5-flash which is fastest and supports JSON output well
+    // v1beta because JSON schema/mode is often more reliable there
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+
+    const body = {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+            responseMimeType: isJson ? "application/json" : "text/plain",
+            temperature: 0.1,
+            maxOutputTokens: 2048,
+        }
+    };
 
     let lastError: any;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let i = 0; i < 3; i++) {
         try {
-            const model = genAI.getGenerativeModel({
-                model: "gemini-1.5-flash",
-                generationConfig: {
-                    responseMimeType: isJson ? "application/json" : "text/plain",
-                    temperature: 0.1,
-                }
+            console.log(`[Gemini] Requesting (Attempt ${i + 1})...`);
+
+            const res = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
             });
 
-            const result = await model.generateContent(prompt);
-            const response = await result.response;
-            const text = response.text();
+            const data = await res.json();
 
-            if (!text) throw new Error("Empty response from AI");
-            return text;
+            if (res.status === 200 && data.candidates?.[0]?.content?.parts?.[0]?.text) {
+                return data.candidates[0].content.parts[0].text;
+            }
+
+            // Error extraction
+            const errMsg = data.error?.message || JSON.stringify(data);
+            console.error(`[Gemini API Error] status=${res.status}:`, errMsg);
+
+            throw new Error(`Gemini API Error (${res.status}): ${errMsg}`);
+
         } catch (error: any) {
             lastError = error;
-            console.warn(`[Gemini Attempt ${attempt} failed]:`, error.message);
+            console.warn(`[Gemini Fetch Attempt ${i + 1} failed]: ${error.message}`);
 
-            // Wait before retry (exponential backoff)
-            if (attempt < 3) {
-                await new Promise(resolve => setTimeout(resolve, attempt * 1000));
-            }
+            // Wait with backoff
+            if (i < 2) await new Promise(r => setTimeout(r, 1500 * (i + 1)));
         }
     }
 
@@ -43,9 +59,9 @@ export async function askGemini(prompt: string, isJson: boolean = false): Promis
 
 export async function generateSearchSummary(query: string): Promise<string> {
     try {
-        const prompt = `Коротко (2 предложения) ответь на вопрос пользователя на русском: "${query}"`;
-        return await askGemini(prompt);
+        const prompt = `Ты бизнес-ассистент. Пользователь ищет: "${query}". Дай краткий ответ в 2 предложениях на русском.`;
+        return await askGemini(prompt, false);
     } catch (e) {
-        return "Не удалось получить ответ.";
+        return "Не удалось получить ответ от ИИ.";
     }
 }

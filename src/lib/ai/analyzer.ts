@@ -17,70 +17,64 @@ export interface AnalysisResult {
   isFallback?: boolean;
 }
 
-/** Clean title from common LLM artifacts like "Title: " or markdown */
-function cleanTitle(title: string): string {
-  return title
+function cleanTitle(t: string): string {
+  return (t || "")
     .replace(/^(заголовок|title|название|тема|новость):\s*/i, "")
     .replace(/[#*`]/g, "")
     .trim();
 }
 
+function extractJson(text: string): any {
+  try {
+    // Remove thinking or preamble
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("JSON Object not found in text");
+    return JSON.parse(match[0]);
+  } catch (e: any) {
+    console.error("[Analyzer] JSON Extract Fail:", e.message);
+    throw e;
+  }
+}
+
 export async function analyzeContent(text: string): Promise<AnalysisResult> {
-  if (!text || text.length < 5) {
-    return { title: "Новый пост", summary: "Нет содержания для анализа", apps: [], isFallback: true };
+  if (!text || text.trim().length < 5) {
+    return { title: "Новый пост", summary: "Описание отсутствует", apps: [], isFallback: true };
   }
 
   const prompt = `
-    Ты эксперт по софту и ИИ. Твоя задача: проанализировать текст и вернуть результат СТРОГО в формате JSON на РУССКОМ языке.
+    Analyze this text and return a JSON object in Russian.
     
-    ЗАДАНИЕ:
-    1. title: Придумай короткий яркий заголовок (без слова "Заголовок").
-    2. summary: Напиши 2-3 предложения о смысле текста.
-    3. apps: Найди все упомянутые сервисы, программы или нейросети.
-    
-    СТРУКТУРА JSON:
-    {
-      "title": "...",
-      "summary": "...",
-      "apps": [
-        {
-          "name": "Название",
-          "category": "LLM|Дизайн|Автоматизация|Другое",
-          "shortDescription": "1 предложение",
-          "detailedDescription": "1 абзац о пользе",
-          "features": ["функция 1", "функция 2"],
-          "url": "https://...",
-          "pricing": "free|paid"
-        }
-      ]
-    }
+    REQUIRED JSON FIELDS:
+    1. "title": Catchy headline (max 60 chars, no "Title:" label).
+    2. "summary": 2-3 sentences summarizing the importance.
+    3. "apps": List of tools/AI/services found. 
+       Each app field: name, category, shortDescription, detailedDescription, features (array), url, pricing.
 
-    ТЕКСТ:
+    TEXT FOR ANALYSIS:
     """
-    ${text.substring(0, 8000)}
+    ${text.substring(0, 7000)}
     """
     `;
 
   try {
-    const rawJson = await askGemini(prompt, true);
-    const parsed = JSON.parse(rawJson);
+    // isJson = true enables responseMimeType: application/json
+    const raw = await askGemini(prompt, true);
+    const parsed = extractJson(raw);
 
     return {
-      title: cleanTitle(parsed.title || ""),
+      title: cleanTitle(parsed.title),
       summary: parsed.summary || "Анализ завершен.",
       apps: Array.isArray(parsed.apps) ? parsed.apps : [],
       isFallback: false
     };
-  } catch (e: any) {
-    console.error("[Analyzer Fail]:", e.message);
+  } catch (error: any) {
+    console.error("[AI-Analyzer] Critical Failure:", error.message);
 
-    // Manual extraction fallback
+    // Robust basic fallback
     const lines = text.split('\n').filter(l => l.trim().length > 10);
-    const autoTitle = cleanTitle(lines[0] || "Новый пост");
-
     return {
-      title: autoTitle,
-      summary: "Краткий обзор временно недоступен — выполняется повторная попытка анализа.",
+      title: cleanTitle(lines[0] || "Новый пост"),
+      summary: "Краткий обзор временно недоступен — сервис аналитики обновляется.",
       apps: [],
       isFallback: true
     };

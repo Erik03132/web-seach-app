@@ -1,4 +1,6 @@
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { analyzeContent } from "../ai/analyzer";
+import { db } from "../firebase/firebase";
 import {
     extractTelegramInfo,
     getRecentTelegramPosts,
@@ -25,9 +27,6 @@ async function registerSource(details: any, type: 'youtube' | 'telegram') {
     const isOld = !isRecent(details.publishedAt);
     const sourceId = type === 'youtube' ? `youtube_${details.id}` : `telegram_${details.channelHandle}_${details.id}`;
 
-    const { db } = await import("@/lib/firebase/firebase");
-    const { doc, getDoc, setDoc, serverTimestamp } = await import("firebase/firestore");
-
     // 1. Check existing record
     const sourceRef = doc(db, "sources", sourceId);
     const snap = await getDoc(sourceRef);
@@ -40,11 +39,14 @@ async function registerSource(details: any, type: 'youtube' | 'telegram') {
         // Success case: has apps and no repair flags
         if (d.detectedApps?.length > 0 && !d.needsRepair && !d.isFallback) return;
 
-        // HARD LIMIT: stop after 10 attempts
-        if (attempts >= 10) return;
-
-        // OR soft limit: if it was a clean run (not fallback) but found NO apps, give it 3 tries
-        if (!d.isFallback && d.detectedApps?.length === 0 && attempts >= 3) return;
+        // HARD LIMIT: stop after 5 attempts to avoid infinite loops and banner-spam
+        if (attempts >= 5) {
+            if (d.needsRepair) {
+                // Force turn off repair flag if we reached the limit
+                await setDoc(sourceRef, { needsRepair: false }, { merge: true });
+            }
+            return;
+        }
     }
 
     if (isOld && !snap.exists()) return;
@@ -58,7 +60,8 @@ async function registerSource(details: any, type: 'youtube' | 'telegram') {
     const sourceData: any = {
         sourceType: type,
         externalId: details.id,
-        title: (analysis.title && analysis.title.length > 5) ? analysis.title : (type === 'youtube' ? details.title : details.text.substring(0, 100)),
+        // UI cleaning will happen in the frontend component, but here we try to be clean too
+        title: (analysis.title && analysis.title.length > 5) ? analysis.title : (type === 'youtube' ? details.title : (details.text || "").substring(0, 100)),
         description: type === 'youtube' ? (details.description || "") : details.text,
         aiSummary: analysis.summary || "",
         author: type === 'youtube' ? details.channelTitle : details.channelHandle,
@@ -69,31 +72,34 @@ async function registerSource(details: any, type: 'youtube' | 'telegram') {
         repairAttempts: attempts + 1,
         isFallback: analysis.isFallback === true,
         // Mark for repair if failed OR if found ZERO apps
-        needsRepair: (analysis.isFallback === true || (analysis.apps || []).length === 0) && attempts < 5,
+        needsRepair: (analysis.isFallback === true || (analysis.apps || []).length === 0) && (attempts + 1) < 5,
         updatedAt: serverTimestamp()
     };
 
     if (!snap.exists()) sourceData.createdAt = serverTimestamp();
-
     await setDoc(sourceRef, sourceData, { merge: true });
 
     // 4. Also register the channel for future scanning
-    if (type === 'youtube' && details.channelId) {
-        const chanRef = doc(db, "channels", details.channelId);
-        await setDoc(chanRef, {
-            title: details.channelTitle,
-            url: `https://youtube.com/channel/${details.channelId}`,
-            sourceType: 'youtube',
-            lastScannedAt: serverTimestamp()
-        }, { merge: true });
-    } else if (type === 'telegram' && details.channelHandle) {
-        const chanRef = doc(db, "channels", `tg_${details.channelHandle}`);
-        await setDoc(chanRef, {
-            title: details.channelHandle,
-            url: `https://t.me/${details.channelHandle}`,
-            sourceType: 'telegram',
-            lastScannedAt: serverTimestamp()
-        }, { merge: true });
+    try {
+        if (type === 'youtube' && details.channelId) {
+            const chanRef = doc(db, "channels", details.channelId);
+            await setDoc(chanRef, {
+                title: details.channelTitle,
+                url: `https://youtube.com/channel/${details.channelId}`,
+                sourceType: 'youtube',
+                lastScannedAt: serverTimestamp()
+            }, { merge: true });
+        } else if (type === 'telegram' && details.channelHandle) {
+            const chanRef = doc(db, "channels", `tg_${details.channelHandle}`);
+            await setDoc(chanRef, {
+                title: details.channelHandle,
+                url: `https://t.me/${details.channelHandle}`,
+                sourceType: 'telegram',
+                lastScannedAt: serverTimestamp()
+            }, { merge: true });
+        }
+    } catch (e) {
+        console.warn("[Register Channel] Failed:", e.message);
     }
 }
 
@@ -110,12 +116,14 @@ export async function processSourceUrl(url: string, type?: 'youtube' | 'telegram
         if (id) {
             const d = await getYoutubeVideoDetails(id);
             if (d) await registerSource(d, 'youtube');
+            return { message: "ok" };
         } else {
             const info = extractChannelInfo(url);
             const pid = info ? await getChannelUploadsPlaylistId(info) : null;
             if (pid) {
                 const vids = await getPlaylistVideos(pid, 3);
                 for (const v of vids) await registerSource(v, 'youtube');
+                return { message: "ok", count: vids.length };
             }
         }
     } else {
@@ -124,9 +132,11 @@ export async function processSourceUrl(url: string, type?: 'youtube' | 'telegram
             if (info.messageId) {
                 const p = await getSingleTelegramPost(info.handle, info.messageId);
                 if (p) await registerSource(p, 'telegram');
+                return { message: "ok" };
             } else {
                 const posts = await getRecentTelegramPosts(info.handle, 3);
                 for (const p of posts) await registerSource(p, 'telegram');
+                return { message: "ok", count: posts.length };
             }
         }
     }
