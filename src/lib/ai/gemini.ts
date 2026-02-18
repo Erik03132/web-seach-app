@@ -1,17 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const apiKey = process.env.GEMINI_API_KEY;
-
-if (!apiKey) {
-    console.warn("GEMINI_API_KEY is not defined. AI features will not work.");
-}
-
 const genAI = new GoogleGenerativeAI(apiKey || "");
 
-/**
- * Common entry point for Gemini calls.
- * Uses the official SDK for reliability.
- */
 export async function askGemini(prompt: string): Promise<string> {
     if (!apiKey) throw new Error("GEMINI_API_KEY missing");
 
@@ -21,8 +12,9 @@ export async function askGemini(prompt: string): Promise<string> {
         const result = await model.generateContent({
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: {
-                temperature: 0.2,
+                temperature: 0.1,
                 topP: 0.95,
+                maxOutputTokens: 2048,
             }
         });
 
@@ -30,7 +22,6 @@ export async function askGemini(prompt: string): Promise<string> {
         const text = response.text();
 
         if (!text) throw new Error("Empty response from Gemini");
-
         return text;
     } catch (error: any) {
         console.error("[Gemini SDK Error]:", error.message);
@@ -40,10 +31,7 @@ export async function askGemini(prompt: string): Promise<string> {
 
 export async function generateSearchSummary(query: string): Promise<string> {
     try {
-        const prompt = `
-        Ты — умный бизнес-ассистент. Пользователь ищет: "${query}".
-        Кратко (2-3 предложения) ответь на русском языке. Будь полезным и конкретным.
-        `;
+        const prompt = `Пользователь ищет: "${query}". Кратко (2-3 предложения) ответь на русском языке.`;
         return await askGemini(prompt);
     } catch (e) {
         return "Не удалось сгенерировать ответ.";
