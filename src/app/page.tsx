@@ -3,7 +3,6 @@
 import { db } from "@/lib/firebase/firebase";
 import { collection, limit, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
 import {
-    AlertCircle,
     Archive,
     Bell,
     Brain,
@@ -363,10 +362,24 @@ function FeedCard({ post, index }: { post: SourcePost, index: number }) {
                                     <span>Выполняется глубокий анализ данных...</span>
                                 </div>
                             ) : post.isFallback ? (
-                                <div className="flex items-center gap-2 text-white/20 text-[10px] uppercase tracking-widest px-3 py-1.5 bg-white/5 rounded-lg border border-white/5 w-fit">
-                                    <AlertCircle size={10} />
-                                    <span>Анализ недоступен (базовое описание)</span>
-                                </div>
+                                <button
+                                    onClick={async () => {
+                                        const tid = toast.loading("Перезапуск разведки...");
+                                        try {
+                                            const res = await fetch('/api/sources', {
+                                                method: 'POST',
+                                                headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ url: post.url })
+                                            });
+                                            if (res.ok) toast.success("Готово! Обновите ленту", { id: tid });
+                                            else toast.error("Ошибка ИИ", { id: tid });
+                                        } catch (e) { toast.error("Ошибка сети", { id: tid }); }
+                                    }}
+                                    className="flex items-center gap-2 text-gold hover:text-gold-light text-[10px] uppercase tracking-widest px-3 py-1.5 bg-gold/10 hover:bg-gold/20 rounded-lg border border-gold/20 w-fit transition-all active:scale-95"
+                                >
+                                    <Sparkles size={10} />
+                                    <span>Повторить анализ</span>
+                                </button>
                             ) : null}
                         </div>
                     </div>

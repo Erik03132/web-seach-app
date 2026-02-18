@@ -17,30 +17,42 @@ export interface AnalysisResult {
   isFallback?: boolean;
 }
 
+/** Clean title from common LLM artifacts like "Title: " or markdown */
+function cleanTitle(title: string): string {
+  return title
+    .replace(/^(заголовок|title|название):\s*/i, "")
+    .replace(/[#*`]/g, "")
+    .trim();
+}
+
 export async function analyzeContent(text: string): Promise<AnalysisResult> {
-  if (!text || text.trim().length < 5) {
-    return { title: "Новый пост", summary: "Описание отсутствует", apps: [], isFallback: true };
+  if (!text || text.length < 5) {
+    return { title: "Новый пост", summary: "Нет данных", apps: [], isFallback: true };
   }
 
-  // Aggressive reasoning prompt
   const prompt = `
-    Analyze this message and extract all software products or web services mentioned.
+    Analyze software/tech content and return ONLY JSON in Russian.
     
-    INSTRUCTIONS:
-    - Step 1: Identify all tools, neuro-networks, mobile apps, or sites.
-    - Step 2: Extract features and pricing for each.
-    - Step 3: Write a 3-sentence summary in Russian.
-    - Step 4: Create a short Russian title.
-    - Final Output: Send ONLY a JSON object.
+    JSON STRUCTURE (Strictly):
+    {
+      "title": "Short headline (no 'Title:' label)",
+      "summary": "2-3 sentences max",
+      "apps": [
+        {
+          "name": "App name",
+          "category": "LLM|Design|Automation|Other",
+          "shortDescription": "One sentence",
+          "detailedDescription": "One paragraph",
+          "features": ["feature 1", "feature 2"],
+          "url": "https://...",
+          "pricing": "free|paid"
+        }
+      ]
+    }
 
-    OUTPUT FIELDS (all strings in Russian):
-    - title: Catchy headline.
-    - summary: Helpful summary.
-    - apps: Array of tools. Each tool needs: name, category, shortDescription, detailedDescription, features (min 3), url, pricing.
-
-    TEXT:
+    CONTENT TO ANALYZE:
     """
-    ${text.substring(0, 10000)}
+    ${text.substring(0, 7000)}
     """
     `;
 
@@ -49,17 +61,18 @@ export async function analyzeContent(text: string): Promise<AnalysisResult> {
     const parsed = JSON.parse(rawJson);
 
     return {
-      title: (parsed.title || "").substring(0, 70),
-      summary: parsed.summary || "Анализ завершен.",
+      title: cleanTitle(parsed.title || ""),
+      summary: parsed.summary || "",
       apps: Array.isArray(parsed.apps) ? parsed.apps : [],
       isFallback: false
     };
-  } catch (error: any) {
-    console.error("[Analyzer Fail]:", error.message);
+  } catch (e: any) {
+    console.error("AI Analysis failed:", e.message);
 
-    const firstLine = text.split('\n')[0].replace(/[#*]/g, '').trim().substring(0, 80);
+    // Manual extraction fallback
+    const lines = text.split('\n').filter(l => l.trim().length > 10);
     return {
-      title: firstLine || "Новый пост",
+      title: cleanTitle(lines[0] || "Новый пост"),
       summary: "Краткий обзор временно недоступен.",
       apps: [],
       isFallback: true
