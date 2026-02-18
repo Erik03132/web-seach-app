@@ -3,6 +3,7 @@
 import { db } from "@/lib/firebase/firebase";
 import { collection, limit, onSnapshot, orderBy, query, Timestamp } from "firebase/firestore";
 import {
+    AlertCircle,
     Archive,
     Bell,
     Brain,
@@ -16,6 +17,7 @@ import {
     Monitor,
     Palette,
     Plus,
+    RefreshCw,
     Search,
     Send,
     Settings,
@@ -46,6 +48,8 @@ interface SourcePost {
     url: string;
     thumbnailUrl?: string;
     detectedApps?: AppRecommendation[];
+    needsRepair?: boolean;
+    isFallback?: boolean;
 }
 
 export default function HomeFeed() {
@@ -127,13 +131,18 @@ export default function HomeFeed() {
             {/* Main Content */}
             <main className="flex-1 overflow-y-auto luxury-gradient relative">
                 <header className="sticky top-0 z-10 glass border-b border-white/5 px-8 py-4 flex items-center justify-between">
-                    <h1 className="text-lg font-medium flex items-center gap-2">
-                        Лента новостей <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
-                    </h1>
+                    <div className="flex items-center gap-6">
+                        <h1 className="text-lg font-medium flex items-center gap-2">
+                            Лента новостей <span className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                        </h1>
+                        <RefreshButton />
+                    </div>
                     <div className="flex items-center gap-4 text-white/60">
                         <Bell size={20} className="hover:text-gold transition-colors cursor-pointer" />
                         <div className="w-[1px] h-4 bg-white/10" />
-                        <div className="text-sm font-light">Обновлено: только что</div>
+                        <div className="text-sm font-light uppercase tracking-widest text-[9px] text-white/30 truncate max-w-[100px] md:max-w-none">
+                            Daily Scan: Active
+                        </div>
                     </div>
                 </header>
 
@@ -157,6 +166,41 @@ export default function HomeFeed() {
                 </div>
             </main>
         </div>
+    );
+}
+
+function RefreshButton() {
+    const [loading, setLoading] = useState(false);
+
+    const handleRefresh = async () => {
+        if (loading) return;
+        setLoading(true);
+        try {
+            const res = await fetch('/api/sources/refresh', { method: 'POST' });
+            if (res.ok) {
+                toast.success("Обновление запущено");
+            } else {
+                toast.error("Ошибка при обновлении");
+            }
+        } catch (e) {
+            toast.error("Ошибка сети");
+        } finally {
+            setTimeout(() => setLoading(false), 2000);
+        }
+    };
+
+    return (
+        <button
+            onClick={handleRefresh}
+            disabled={loading}
+            className={`flex items-center gap-2 px-4 py-1.5 rounded-full border transition-all active:scale-95 ${loading ? "bg-gold/10 border-gold/20 text-gold/50 cursor-default" : "bg-white/5 border-white/10 text-white/50 hover:bg-white/10 hover:text-white"
+                }`}
+        >
+            <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+            <span className="text-[10px] font-bold uppercase tracking-widest">
+                {loading ? "Сканирование..." : "Обновить"}
+            </span>
+        </button>
     );
 }
 
@@ -291,6 +335,20 @@ function FeedCard({ post, index }: { post: SourcePost, index: number }) {
                                 </p>
                             </div>
                         )}
+
+                        <div className="mt-4 flex flex-wrap gap-2">
+                            {post.needsRepair ? (
+                                <div className="flex items-center gap-2 text-gold/40 text-[10px] uppercase tracking-widest px-3 py-1.5 bg-gold/5 rounded-lg border border-gold/10 w-fit">
+                                    <RefreshCw size={10} className="animate-spin" />
+                                    <span>Выполняется глубокий анализ данных...</span>
+                                </div>
+                            ) : post.isFallback ? (
+                                <div className="flex items-center gap-2 text-white/20 text-[10px] uppercase tracking-widest px-3 py-1.5 bg-white/5 rounded-lg border border-white/5 w-fit">
+                                    <AlertCircle size={10} />
+                                    <span>Анализ недоступен (базовое описание)</span>
+                                </div>
+                            ) : null}
+                        </div>
                     </div>
                 </div>
 
