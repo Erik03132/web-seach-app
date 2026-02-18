@@ -14,7 +14,7 @@ import {
     YoutubeVideoDetails
 } from "./youtube";
 
-const RECENT_DAYS_THRESHOLD = 60;
+const RECENT_DAYS_THRESHOLD = 90;
 
 function isRecent(dateStr: string): boolean {
     const published = new Date(dateStr);
@@ -40,19 +40,23 @@ async function saveYoutubeVideoToFirestore(details: YoutubeVideoDetails) {
     const sourceRef = doc(db, "sources", sourceId);
     const sourceDoc = await getDoc(sourceRef);
 
-    let repairAttempts = 0;
+    let currentRepairAttempts = 0;
     if (sourceDoc.exists()) {
         const data = sourceDoc.data();
-        repairAttempts = data.repairAttempts || 0;
-        // IF HEALTHY, RETURN
-        if (data.detectedApps?.length > 0 && !data.needsRepair && !data.isFallback) return { status: "exists", data };
-        if (repairAttempts >= 10) return { status: "exists", data };
+        currentRepairAttempts = data.repairAttempts || 0;
+
+        // IF we have apps AND no repair flag AND it's not a fallback, we are GOOD.
+        if (data.detectedApps?.length > 0 && data.needsRepair === false && !data.isFallback) {
+            return { status: "exists", data };
+        }
+        // IF too many attempts, stop
+        if (currentRepairAttempts >= 12) return { status: "exists", data };
     }
 
-    console.log(`[Processor] Analyzing YT: ${details.id}`);
-    const analysis = await analyzeContent(`${details.title}\n${details.description}`);
+    console.log(`[Processor] Analyzing YT: ${details.id} (Attempt ${currentRepairAttempts + 1})`);
+    const analysis = await analyzeContent(`${details.title}\n\n${details.description}`);
 
-    const sourceData = {
+    const sourceData: any = {
         sourceType: "youtube",
         externalId: details.id,
         title: analysis.title || details.title,
@@ -64,11 +68,13 @@ async function saveYoutubeVideoToFirestore(details: YoutubeVideoDetails) {
         thumbnailUrl: details.thumbnailUrl,
         tags: details.tags || [],
         detectedApps: analysis.apps || [],
-        repairAttempts: repairAttempts + 1,
+        repairAttempts: currentRepairAttempts + 1,
         isFallback: analysis.isFallback === true,
-        needsRepair: (analysis.isFallback === true || analysis.apps.length === 0) && repairAttempts < 3,
-        createdAt: sourceDoc.exists() ? (sourceDoc.data().createdAt || serverTimestamp()) : serverTimestamp(),
+        // Mark for repair if failed or no apps (until limit reached)
+        needsRepair: (analysis.isFallback === true || analysis.apps.length === 0) && currentRepairAttempts < 5,
     };
+
+    if (!sourceDoc.exists()) sourceData.createdAt = serverTimestamp();
 
     await setDoc(sourceRef, sourceData, { merge: true });
     return { status: "created", data: sourceData };
@@ -84,18 +90,20 @@ async function saveTelegramPostToFirestore(details: TelegramPostDetails) {
     const sourceRef = doc(db, "sources", sourceId);
     const sourceDoc = await getDoc(sourceRef);
 
-    let repairAttempts = 0;
+    let currentRepairAttempts = 0;
     if (sourceDoc.exists()) {
         const data = sourceDoc.data();
-        repairAttempts = data.repairAttempts || 0;
-        if (data.detectedApps?.length > 0 && !data.needsRepair && !data.isFallback) return { status: "exists", data };
-        if (repairAttempts >= 10) return { status: "exists", data };
+        currentRepairAttempts = data.repairAttempts || 0;
+        if (data.detectedApps?.length > 0 && data.needsRepair === false && !data.isFallback) {
+            return { status: "exists", data };
+        }
+        if (currentRepairAttempts >= 12) return { status: "exists", data };
     }
 
-    console.log(`[Processor] Analyzing TG: ${details.id}`);
+    console.log(`[Processor] Analyzing TG: ${details.id} (Attempt ${currentRepairAttempts + 1})`);
     const analysis = await analyzeContent(details.text);
 
-    const sourceData = {
+    const sourceData: any = {
         sourceType: "telegram",
         externalId: details.id,
         title: analysis.title || details.text.split('\n')[0].substring(0, 100),
@@ -107,11 +115,12 @@ async function saveTelegramPostToFirestore(details: TelegramPostDetails) {
         thumbnailUrl: details.imageUrl || null,
         tags: [],
         detectedApps: analysis.apps || [],
-        repairAttempts: repairAttempts + 1,
+        repairAttempts: currentRepairAttempts + 1,
         isFallback: analysis.isFallback === true,
-        needsRepair: (analysis.isFallback === true || analysis.apps.length === 0) && repairAttempts < 3,
-        createdAt: sourceDoc.exists() ? (sourceDoc.data().createdAt || serverTimestamp()) : serverTimestamp(),
+        needsRepair: (analysis.isFallback === true || analysis.apps.length === 0) && currentRepairAttempts < 5,
     };
+
+    if (!sourceDoc.exists()) sourceData.createdAt = serverTimestamp();
 
     await setDoc(sourceRef, sourceData, { merge: true });
     return { status: "created", data: sourceData };
