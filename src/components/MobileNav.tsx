@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, Layers, Plus, Search } from "lucide-react";
+import { LayoutGrid, Search, Settings, Star, TrendingUp } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -10,33 +10,34 @@ export default function MobileNav() {
     const isActive = (path: string) => pathname === path;
 
     return (
-        <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 glass border-t border-white/10 px-6 py-4 flex items-center justify-between safe-area-bottom">
-            <Link href="/" className={`flex flex-col items-center gap-1 ${isActive('/') ? 'text-gold' : 'text-white/40'}`}>
-                <Layers size={20} />
-                <span className="text-[10px] font-medium">Лента</span>
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 glass border-t px-6 py-4 flex justify-around items-center safe-area-bottom bg-background/80">
+            <Link href="/" className={`flex flex-col items-center gap-1 transition-colors ${isActive('/') ? 'text-accent' : 'text-muted hover:text-white'}`}>
+                <TrendingUp size={24} />
+                <span className="text-[10px] font-bold uppercase">Feed</span>
             </Link>
 
-            <Link href="/archive" className={`flex flex-col items-center gap-1 ${isActive('/archive') ? 'text-gold' : 'text-white/40'}`}>
-                <Archive size={20} />
-                <span className="text-[10px] font-medium">Архив</span>
+            <Link href="/archive" className={`flex flex-col items-center gap-1 transition-colors ${isActive('/archive') ? 'text-accent' : 'text-muted hover:text-white'}`}>
+                <LayoutGrid size={24} />
+                <span className="text-[10px] font-bold uppercase">Apps</span>
             </Link>
 
-            <Link href="/test-add-source" className="relative -top-5">
-                <div className="w-12 h-12 bg-gold text-black rounded-full flex items-center justify-center shadow-[0_0_15px_rgba(212,175,55,0.4)] border-4 border-black">
-                    <Plus size={24} />
-                </div>
-            </Link>
-
-            <Link href="/discover" className={`flex flex-col items-center gap-1 ${isActive('/discover') ? 'text-gold' : 'text-white/40'}`}>
-                <Search size={20} />
-                <span className="text-[10px] font-medium">Обзор</span>
-            </Link>
-
-            <div className="flex flex-col items-center gap-1 text-white/40 pointer-events-none opacity-50">
-                {/* Placeholder for Profile/Settings if needed later */}
-                <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-gold to-gold-light" />
-                <span className="text-[10px] font-medium">Профиль</span>
+            <div className="relative -top-4">
+                <Link href="/discover" className="w-14 h-14 bg-accent text-background rounded-2xl flex items-center justify-center shadow-lg shadow-accent/20 rotate-45 group transition-transform hover:scale-105 active:scale-95">
+                    <div className="-rotate-45">
+                        <Search size={24} strokeWidth={3} />
+                    </div>
+                </Link>
             </div>
-        </div>
+
+            <Link href="/favorites" className={`flex flex-col items-center gap-1 transition-colors ${isActive('/favorites') ? 'text-accent' : 'text-muted hover:text-white'}`}>
+                <Star size={24} />
+                <span className="text-[10px] font-bold uppercase">Saved</span>
+            </Link>
+
+            <Link href="/profile" className={`flex flex-col items-center gap-1 transition-colors ${isActive('/profile') ? 'text-accent' : 'text-muted hover:text-white'}`}>
+                <Settings size={24} />
+                <span className="text-[10px] font-bold uppercase">Self</span>
+            </Link>
+        </nav>
     );
 }

@@ -4,10 +4,15 @@ export interface AppRecommendation {
   name: string;
   category: string;
   shortDescription: string;
-  detailedDescription: string;
-  features: string[];
+  features?: string[];
+  pricing?: {
+    hasFree: boolean;
+    freeLimit?: string;
+    minPrice?: string;
+    hasApi: boolean;
+    hasMcp: boolean;
+  };
   url?: string;
-  pricing?: "free" | "paid" | "freemium";
 }
 
 export interface AnalysisResult {
@@ -19,62 +24,80 @@ export interface AnalysisResult {
 
 function cleanTitle(t: string): string {
   return (t || "")
-    .replace(/^(заголовок|title|название|тема|новость):\s*/i, "")
-    .replace(/[#*`]/g, "")
+    .replace(/^(заголовок|title|название|тема|новость|обзор):\s*/i, "")
+    .replace(/[#*`"']/g, "")
     .trim();
 }
 
 function extractJson(text: string): any {
   try {
-    // Remove thinking or preamble
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) throw new Error("JSON Object not found in text");
-    return JSON.parse(match[0]);
+    const raw = text.replace(/```json/g, "").replace(/```/g, "").trim();
+    return JSON.parse(raw);
   } catch (e: any) {
-    console.error("[Analyzer] JSON Extract Fail:", e.message);
-    throw e;
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error("JSON not found");
+    return JSON.parse(match[0]);
   }
 }
 
 export async function analyzeContent(text: string): Promise<AnalysisResult> {
-  if (!text || text.trim().length < 5) {
-    return { title: "Новый пост", summary: "Описание отсутствует", apps: [], isFallback: true };
+  const safeText = (text || "").trim();
+  if (safeText.length < 10) {
+    return { title: "Новый пост", summary: "Нет контента для анализа.", apps: [], isFallback: true };
   }
 
   const prompt = `
-    Analyze this text and return a JSON object in Russian.
+    Ты супер-аналитик нейросетей. Твоя задача: найти все упомянутые сервисы, программы или нейросети.
     
-    REQUIRED JSON FIELDS:
-    1. "title": Catchy headline (max 60 chars, no "Title:" label).
-    2. "summary": 2-3 sentences summarizing the importance.
-    3. "apps": List of tools/AI/services found. 
-       Each app field: name, category, shortDescription, detailedDescription, features (array), url, pricing.
+    ДЛЯ КАЖДОГО СЕРВИСА:
+    1. Найди 3 главных преимущества.
+    2. Узнай про наличие бесплатной версии и её лимиты (дневные/месячные).
+    3. Узнай минимальную цену платной подписки.
+    4. Проверь наличие API или поддержки MCP (Model Context Protocol).
 
-    TEXT FOR ANALYSIS:
+    ОТДАЙ ТОЛЬКО JSON:
+    {
+      "title": "Краткий заголовок",
+      "summary": "Суть в 2 фразах",
+      "apps": [
+        {
+          "name": "Название",
+          "category": "Категория",
+          "shortDescription": "Описание 1 фразой",
+          "features": ["Фишка 1", "Фишка 2", "Фишка 3"],
+          "pricing": {
+             "hasFree": true/false,
+             "freeLimit": "описание (например: 5 генераций/день)",
+             "minPrice": "например: $10/мес",
+             "hasApi": true/false,
+             "hasMcp": true/false
+          },
+          "url": "URL или null"
+        }
+      ]
+    }
+
+    ТЕКСТ:
     """
-    ${text.substring(0, 7000)}
+    ${safeText.substring(0, 8000)}
     """
     `;
 
   try {
-    // isJson = true enables responseMimeType: application/json
     const raw = await askGemini(prompt, true);
     const parsed = extractJson(raw);
 
     return {
       title: cleanTitle(parsed.title),
-      summary: parsed.summary || "Анализ завершен.",
+      summary: parsed.summary || (safeText.substring(0, 200) + "..."),
       apps: Array.isArray(parsed.apps) ? parsed.apps : [],
       isFallback: false
     };
   } catch (error: any) {
-    console.error("[AI-Analyzer] Critical Failure:", error.message);
-
-    // Robust basic fallback
-    const lines = text.split('\n').filter(l => l.trim().length > 10);
+    console.error("[AI-Analyzer] Fail:", error.message);
     return {
-      title: cleanTitle(lines[0] || "Новый пост"),
-      summary: "Краткий обзор временно недоступен — сервис аналитики обновляется.",
+      title: cleanTitle(safeText.substring(0, 60)),
+      summary: "Анализ временно недоступен.",
       apps: [],
       isFallback: true
     };

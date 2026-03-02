@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc, Timestamp } from "firebase/firestore";
 import { analyzeContent } from "../ai/analyzer";
 import { db } from "../firebase/firebase";
 import {
@@ -14,7 +14,7 @@ import {
     getYoutubeVideoDetails
 } from "./youtube";
 
-const RECENT_DAYS_THRESHOLD = 90;
+const RECENT_DAYS_THRESHOLD = 1095;
 
 function isRecent(dateStr: string): boolean {
     if (!dateStr) return false;
@@ -23,63 +23,7 @@ function isRecent(dateStr: string): boolean {
     return Math.abs(now.getTime() - published.getTime()) < (RECENT_DAYS_THRESHOLD * 24 * 60 * 60 * 1000);
 }
 
-async function registerSource(details: any, type: 'youtube' | 'telegram') {
-    const isOld = !isRecent(details.publishedAt);
-    const sourceId = type === 'youtube' ? `youtube_${details.id}` : `telegram_${details.channelHandle}_${details.id}`;
-
-    // 1. Check existing record
-    const sourceRef = doc(db, "sources", sourceId);
-    const snap = await getDoc(sourceRef);
-
-    let attempts = 0;
-    if (snap.exists()) {
-        const d = snap.data();
-        attempts = d.repairAttempts || 0;
-
-        // Success case: has apps and no repair flags
-        if (d.detectedApps?.length > 0 && !d.needsRepair && !d.isFallback) return;
-
-        // HARD LIMIT: stop after 5 attempts to avoid infinite loops and banner-spam
-        if (attempts >= 5) {
-            if (d.needsRepair) {
-                // Force turn off repair flag if we reached the limit
-                await setDoc(sourceRef, { needsRepair: false }, { merge: true });
-            }
-            return;
-        }
-    }
-
-    if (isOld && !snap.exists()) return;
-
-    // 2. Perform AI Analysis
-    console.log(`[AI SYNC] Processing ${sourceId} (Attempt ${attempts + 1})`);
-    const content = type === 'youtube' ? `${details.title}\n\n${details.description}` : details.text;
-    const analysis = await analyzeContent(content);
-
-    // 3. Save Data
-    const sourceData: any = {
-        sourceType: type,
-        externalId: details.id,
-        // UI cleaning will happen in the frontend component, but here we try to be clean too
-        title: (analysis.title && analysis.title.length > 5) ? analysis.title : (type === 'youtube' ? details.title : (details.text || "").substring(0, 100)),
-        description: type === 'youtube' ? (details.description || "") : details.text,
-        aiSummary: analysis.summary || "",
-        author: type === 'youtube' ? details.channelTitle : details.channelHandle,
-        publishedAt: details.publishedAt,
-        url: details.url,
-        thumbnailUrl: type === 'youtube' ? details.thumbnailUrl : (details.imageUrl || null),
-        detectedApps: analysis.apps || [],
-        repairAttempts: attempts + 1,
-        isFallback: analysis.isFallback === true,
-        // Mark for repair if failed OR if found ZERO apps
-        needsRepair: (analysis.isFallback === true || (analysis.apps || []).length === 0) && (attempts + 1) < 5,
-        updatedAt: serverTimestamp()
-    };
-
-    if (!snap.exists()) sourceData.createdAt = serverTimestamp();
-    await setDoc(sourceRef, sourceData, { merge: true });
-
-    // 4. Also register the channel for future scanning
+async function registerChannel(details: any, type: 'youtube' | 'telegram') {
     try {
         if (type === 'youtube' && details.channelId) {
             const chanRef = doc(db, "channels", details.channelId);
@@ -98,9 +42,84 @@ async function registerSource(details: any, type: 'youtube' | 'telegram') {
                 lastScannedAt: serverTimestamp()
             }, { merge: true });
         }
-    } catch (e) {
+    } catch (e: any) {
         console.warn("[Register Channel] Failed:", e.message);
     }
+}
+
+async function registerSource(details: any, type: 'youtube' | 'telegram') {
+    // A. Always try to register/update the channel first
+    await registerChannel(details, type);
+
+    const isOld = !isRecent(details.publishedAt);
+    const sourceId = type === 'youtube' ? `youtube_${details.id}` : `telegram_${details.channelHandle}_${details.id}`;
+
+    console.log(`[PROCESSOR] Checking source: ${sourceId}, publishedAt: ${details.publishedAt}, isOld: ${isOld}`);
+
+    // 1. Check existing record
+    const sourceRef = doc(db, "sources", sourceId);
+    const snap = await getDoc(sourceRef);
+
+    let attempts = 0;
+    if (snap.exists()) {
+        const d = snap.data();
+        attempts = d.repairAttempts || 0;
+
+        // Success case: has apps and no repair flags
+        if (d.detectedApps?.length > 0 && !d.needsRepair && !d.isFallback) {
+            console.log(`[PROCESSOR] Source ${sourceId} already exists and is fine.`);
+            return;
+        }
+
+        // HARD LIMIT: stop after 5 attempts to avoid infinite loops
+        if (attempts >= 5) {
+            if (d.needsRepair) {
+                await setDoc(sourceRef, { needsRepair: false }, { merge: true });
+            }
+            return;
+        }
+    }
+
+    // Skip OLD videos unless they already exist (keep historical data if we have it)
+    if (isOld && !snap.exists()) {
+        console.warn(`[PROCESSOR] Skipping OLD source: ${sourceId} (${details.publishedAt})`);
+        return;
+    }
+
+    // 2. Perform AI Analysis
+    console.log(`[AI SYNC] Processing ${sourceId} (Attempt ${attempts + 1})`);
+    const content = type === 'youtube' ? `${details.title}\n\n${details.description}` : details.text;
+    const analysis = await analyzeContent(content);
+
+    // 3. Save Data - convert publishedAt string to Timestamp for proper sorting
+    let publishedAtTimestamp: Timestamp | null = null;
+    if (details.publishedAt) {
+        const date = new Date(details.publishedAt);
+        if (!isNaN(date.getTime())) {
+            publishedAtTimestamp = Timestamp.fromDate(date);
+        }
+    }
+
+    const sourceData: any = {
+        sourceType: type,
+        externalId: details.id,
+        title: (analysis.title && analysis.title.length > 5) ? analysis.title : (type === 'youtube' ? details.title : (details.text || "").substring(0, 100)),
+        description: type === 'youtube' ? (details.description || "") : details.text,
+        aiSummary: analysis.summary || "",
+        author: type === 'youtube' ? details.channelTitle : details.channelHandle,
+        publishedAt: publishedAtTimestamp,
+        publishedAtISO: details.publishedAt, // Keep original ISO string for display
+        url: details.url,
+        thumbnailUrl: type === 'youtube' ? details.thumbnailUrl : (details.imageUrl || null),
+        detectedApps: analysis.apps || [],
+        repairAttempts: attempts + 1,
+        isFallback: analysis.isFallback === true,
+        needsRepair: (analysis.isFallback === true || (analysis.apps || []).length === 0) && (attempts + 1) < 5,
+        updatedAt: serverTimestamp()
+    };
+
+    if (!snap.exists()) sourceData.createdAt = serverTimestamp();
+    await setDoc(sourceRef, sourceData, { merge: true });
 }
 
 export async function processSourceUrl(url: string, type?: 'youtube' | 'telegram') {

@@ -4,54 +4,62 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(_request: Request) {
     const startTime = Date.now();
-    const TIME_BUDGET = 55000; // 55s limit
+    const TIME_BUDGET = 45000; // 45s - trying to fit more work before Vercel timeout
 
     try {
         const { db } = await import("@/lib/firebase/firebase");
-        const { collection, getDocs, query, where, limit } = await import("firebase/firestore");
+        const { collection, getDocs, query, where, limit, orderBy } = await import("firebase/firestore");
         const { processSourceUrl } = await import("@/lib/sources/processor");
 
-        console.log("[Refresh] Triggered...");
+        console.log("[Refresh] Massive Scan Triggered...");
 
-        // 1. Repair failed items (visible to user)
+        // 1. Prioritize Repairs (fix ugly колесики)
         const repairQuery = query(
             collection(db, "sources"),
             where("needsRepair", "==", true),
-            limit(15)
+            limit(10)
         );
         const repairSnap = await getDocs(repairQuery);
-        console.log(`[Refresh] Repairing ${repairSnap.size} items.`);
+        console.log(`[Refresh] Found ${repairSnap.size} items for repair.`);
 
         for (const docSnap of repairSnap.docs) {
             if (Date.now() - startTime > TIME_BUDGET) break;
             const data = docSnap.data();
             try {
                 await processSourceUrl(data.url, data.sourceType);
-            } catch (e: any) {
-                console.error("[Refresh] Repair fail:", e.message);
-            }
+            } catch (e) { }
         }
 
-        // 2. Refresh random channels
+        // 2. Scan ALL channels that haven't been scanned in the last 2 hours
+        // or just pick a larger random set if we have many channels now.
         const channelsSnap = await getDocs(collection(db, "channels"));
-        const channels = channelsSnap.docs
-            .map(d => ({ url: d.data().url, type: d.data().sourceType }))
-            .sort(() => 0.5 - Math.random())
-            .slice(0, 3);
+        let channels = channelsSnap.docs.map(d => ({ url: d.data().url, type: d.data().sourceType }));
 
+        // Randomize so we eventually cover everything
+        channels = channels.sort(() => 0.5 - Math.random());
+
+        console.log(`[Refresh] Scanning pool of ${channels.length} channels.`);
+
+        let processedCount = 0;
         for (const ch of channels) {
-            if (Date.now() - startTime > TIME_BUDGET) break;
+            // If we've processed 6 channels OR time is running out, stop
+            if (processedCount >= 6 || (Date.now() - startTime > TIME_BUDGET)) break;
+
             try {
-                console.log(`[Refresh] Channel scan: ${ch.url}`);
+                console.log(`[Refresh] Scanning: ${ch.url}`);
                 await processSourceUrl(ch.url, ch.type);
-            } catch (e: any) {
-                console.error("[Refresh] Scan fail:", e.message);
-            }
+                processedCount++;
+            } catch (e) { }
         }
 
-        return NextResponse.json({ success: true, duration: Date.now() - startTime });
+        return NextResponse.json({
+            success: true,
+            channelsScanned: processedCount,
+            duration: Date.now() - startTime
+        });
+
     } catch (error: any) {
-        console.error("[Refresh CRITICAL]:", error.message);
+        console.error("[Refresh Error]:", error.message);
         return NextResponse.json({ success: false, error: error.message }, { status: 200 });
     }
 }

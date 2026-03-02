@@ -1,0 +1,19 @@
+{
+    "indexes": [
+        {
+            "collectionGroup": "sources",
+            "queryScope": "COLLECTION",
+            "fields": [
+                {
+                    "fieldPath": "sourceType",
+                    "order": "ASCENDING"
+                },
+                {
+                    "fieldPath": "publishedAt",
+                    "order": "DESCENDING"
+                }
+            ]
+        }
+    ],
+    "fieldOverrides": []
+}

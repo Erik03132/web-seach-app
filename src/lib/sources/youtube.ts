@@ -5,6 +5,7 @@ export interface YoutubeVideoDetails {
     description: string;
     publishedAt: string;
     channelTitle: string;
+    channelId: string;
     thumbnailUrl: string;
     tags: string[];
     url: string;
@@ -121,6 +122,7 @@ export async function getPlaylistVideos(playlistId: string, maxResults: number =
                 description: snippet.description,
                 publishedAt: snippet.publishedAt,
                 channelTitle: snippet.channelTitle,
+                channelId: snippet.channelId,
                 thumbnailUrl: thumbnail,
                 tags: [], // PlaylistItems API doesn't return tags, we'd need another call for that, but description is usually enough
                 url: `https://www.youtube.com/watch?v=${snippet.resourceId.videoId}`
@@ -182,6 +184,7 @@ export async function getYoutubeVideoDetails(videoId: string): Promise<YoutubeVi
             description: snippet.description,
             publishedAt: snippet.publishedAt,
             channelTitle: snippet.channelTitle,
+            channelId: snippet.channelId,
             thumbnailUrl: thumbnail,
             tags: snippet.tags || [],
             url: `https://www.youtube.com/watch?v=${item.id}`
